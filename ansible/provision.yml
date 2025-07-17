@@ -1,0 +1,53 @@
+# ansible/provision.yml
+---
+- name: Provision Debian VM for Docker application
+  hosts: webservers
+  become: yes # Run tasks with sudo privileges
+
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install essential packages
+      ansible.builtin.apt:
+        name:
+          - curl
+          - git
+          - ufw # Uncomplicated Firewall
+        state: present
+
+    - name: Install Docker and Docker Compose Plugin
+      ansible.builtin.apt:
+        name:
+          - docker.io
+          - docker-compose-plugin # For 'docker compose' command (v2)
+        state: present
+
+    - name: Add remote user to 'docker' group
+      ansible.builtin.user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+    - name: Enable UFW and allow SSH, Frontend, and Backend ports
+      community.general.ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "22"
+        - "{{ frontend_app_port }}"
+        - "{{ backend_api_port }}"
+      notify: Reload UFW
+
+    - name: Enable UFW
+      community.general.ufw:
+        state: enabled
+      notify: Reload UFW
+
+  handlers:
+    - name: Reload UFW
+      community.general.ufw:
+        state: reloaded

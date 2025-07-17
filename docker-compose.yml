@@ -1,0 +1,57 @@
+services:
+  backend:
+    build:
+      context: ./backend # Dockerfile is in ./backend
+    container_name: shopping-list-backend
+    ports:
+      - "${BACKEND_PORT:-5000}:${BACKEND_PORT:-5000}" # Map host_port:container_port
+    networks:
+      - shopping-list-network
+    restart: always
+    environment:
+      DB_HOST: db # Service name of the database container
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      FRONTEND_URL: ${FRONTEND_URL}
+      PORT: ${BACKEND_PORT:-5000}
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      - db # Ensure database starts before backend
+
+  frontend:
+    build:
+      context: ./frontend # Dockerfile is in ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Pass backend URL as a build argument to React app for runtime config
+        REACT_APP_BACKEND_URL: http://${HOST_IP}:${BACKEND_PORT:-5000}
+    container_name: shopping-list-frontend
+    ports:
+      - "3000:80" # Map host_port:container_port (Nginx in container listens on 80)
+    depends_on:
+      - backend # Ensure backend starts before frontend
+    networks:
+      - shopping-list-network
+    restart: always
+
+  db:
+    image: mysql:8.0 # Use MySQL 8.0 image
+    container_name: shopping-list-mysql-db
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD} # Root password for MySQL
+      MYSQL_DATABASE: ${DB_NAME}          # Database created on startup
+    ports:
+      - "3306:3306" # Optional: Map MySQL port to host for external access (e.g., MySQL Workbench)
+    networks:
+      - shopping-list-network
+    volumes:
+      - db_data:/var/lib/mysql        # Persistent volume for database data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql # Script to run on first container start
+
+networks:
+  shopping-list-network:
+    driver: bridge # Defines a custom bridge network for services to communicate
+
+volumes:
+  db_data: # Define the named volume for database persistence

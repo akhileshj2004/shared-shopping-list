@@ -1,0 +1,82 @@
+# ansible/deploy.yml
+---
+- name: Deploy Shopping List Application
+  hosts: webservers
+  become: yes # This means all tasks will run with sudo privileges on the target host
+
+  # Variables are automatically loaded from ansible/group_vars/webservers.yml.
+  vars:
+    env_file_content: |
+      DB_HOST=db
+      DB_USER={{ db_user }}
+      DB_PASSWORD={{ db_password }}
+      DB_NAME={{ db_name }}
+      JWT_SECRET={{ jwt_secret }}
+      FRONTEND_URL=http://{{ ansible_host }}:{{ frontend_app_port }}
+      PORT={{ backend_api_port }}
+
+  tasks:
+    - name: Ensure deployment directory exists
+      ansible.builtin.file:
+        path: "{{ deploy_dir }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+
+    - name: Clone or pull application repository
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: "{{ deploy_dir }}"
+        version: master
+        accept_hostkey: yes
+        single_branch: yes
+        force: yes
+      become_user: "{{ ansible_user }}"
+
+    - name: Create .env file with secrets
+      ansible.builtin.copy:
+        content: "{{ env_file_content }}"
+        dest: "{{ deploy_dir }}/.env"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0640'
+
+    - name: Bring down existing services (if any) and remove volumes
+      # FIX: Add 'environment' block to pass variables to the task's execution context
+      environment:
+        HOST_IP: "{{ ansible_host }}"
+        BACKEND_PORT: "{{ backend_api_port }}"
+        FRONTEND_PORT: "{{ frontend_app_port }}"
+      community.docker.docker_compose_v2:
+        project_src: "{{ deploy_dir }}"
+        state: absent
+        remove_volumes: yes
+      ignore_errors: yes
+
+    - name: Pull latest Docker images
+      # FIX: Add 'environment' block for consistency
+      environment:
+        HOST_IP: "{{ ansible_host }}"
+        BACKEND_PORT: "{{ backend_api_port }}"
+        FRONTEND_PORT: "{{ frontend_app_port }}"
+      community.docker.docker_compose_v2:
+        project_src: "{{ deploy_dir }}"
+        pull: 'always'
+
+    - name: Build and run Docker Compose services
+      ansible.builtin.shell: |
+        cd "{{ deploy_dir }}"
+        # Export environment variables that docker compose will read from the host environment
+        export HOST_IP="{{ ansible_host }}"
+        export BACKEND_PORT="{{ backend_api_port }}"
+        export FRONTEND_PORT="{{ frontend_app_port }}"
+
+        docker compose up --build -d
+      args:
+        chdir: "{{ deploy_dir }}"
+      register: compose_output
+
+    - name: Display docker compose output
+      ansible.builtin.debug:
+        var: compose_output.stdout_lines
